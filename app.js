@@ -160,6 +160,15 @@ app.post("/api/initiate-payment", (req, res) => {
     res.status(200).json(response);
 });
 
+app.get('/dmt/payment', (req, res) => {
+  // Log to the console to show that the backend received the request before redirecting.
+  // This is useful for debugging.
+  console.log(`[${new Date().toLocaleTimeString('en-LK')}] Received request. Redirecting to: ${FRONTEND_URL}`);
+  
+  // Use the res.redirect() method to perform the redirection.
+  // A 302 status code (Found - temporary redirect) is sent by default.
+  res.redirect("c");
+});
 
 //PORT ENVIRONMENT VARIABLE
 const port = PORT || 8888; // Ensure a default port
