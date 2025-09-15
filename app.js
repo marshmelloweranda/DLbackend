@@ -28,10 +28,16 @@ app.get("/", (req, res) => {
  */
 app.post("/delegate/fetchUserInfo", async (req, res) => {
   try {
+        console.log("HI")
+
     const tokenResponse = await post_GetToken(req.body);
+    console.log("token response",tokenResponse);
+    if (tokenResponse.error) {
+      return res.status(400).send(tokenResponse);
+    }
     res.send(await get_GetUserInfo(tokenResponse.access_token));
   } catch (error) {
-    console.log(error)
+    console.log(error+ "app js error")
     res.status(500).send(error);
   }
 });
