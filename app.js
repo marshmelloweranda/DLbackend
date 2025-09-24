@@ -142,6 +142,85 @@ app.get('/dmt/payment', (req, res) => {
   res.redirect("c");
 });
 
+app.get("/api/licence-categories", async (req, res) => {
+  try {
+    const categories = await getLicenceCategories();
+    res.status(200).json(categories);
+  } catch (error) {
+    console.error("Error fetching licence categories:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   GET /api/licence-categories/:categoryCode
+ * @desc    Get specific licence category by code
+ * @access  Public
+ */
+app.get("/api/licence-categories/:categoryCode", async (req, res) => {
+  try {
+    const { categoryCode } = req.params;
+    const category = await getLicenceCategoryByCode(categoryCode);
+    res.status(200).json(category);
+  } catch (error) {
+    console.error("Error fetching licence category:", error);
+    res.status(404).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/licence-categories
+ * @desc    Add new licence category (Admin function)
+ * @access  Public (should be protected in production)
+ */
+app.post("/api/licence-categories", async (req, res) => {
+  try {
+    const categoryData = req.body;
+    const newCategory = await addLicenceCategory(categoryData);
+    res.status(201).json(newCategory);
+  } catch (error) {
+    console.error("Error adding licence category:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   PUT /api/licence-categories/:categoryCode
+ * @desc    Update existing licence category (Admin function)
+ * @access  Public (should be protected in production)
+ */
+app.put("/api/licence-categories/:categoryCode", async (req, res) => {
+  try {
+    const { categoryCode } = req.params;
+    const categoryData = req.body;
+    const updatedCategory = await updateLicenceCategory(categoryCode, categoryData);
+    res.status(200).json(updatedCategory);
+  } catch (error) {
+    console.error("Error updating licence category:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   DELETE /api/licence-categories/:categoryCode
+ * @desc    Delete licence category (soft delete - Admin function)
+ * @access  Public (should be protected in production)
+ */
+app.delete("/api/licence-categories/:categoryCode", async (req, res) => {
+  try {
+    const { categoryCode } = req.params;
+    const deletedCategory = await deleteLicenceCategory(categoryCode);
+    res.status(200).json({ 
+      message: `Category ${categoryCode} deleted successfully`,
+      category: deletedCategory 
+    });
+  } catch (error) {
+    console.error("Error deleting licence category:", error);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+
 // PORT ENVIRONMENT VARIABLE
 const port = PORT || 8888; // Ensure a default port
 app.listen(port, () => console.log(`Listening on port ${port}..`));

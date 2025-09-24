@@ -1,6 +1,7 @@
 const axios = require("axios");
 const jose = require("jose");
 const { importJWK, SignJWT, decodeJwt } = require("jose");
+const User = require("./models/userModel");
 
 const { ESIGNET_SERVICE_URL, ESIGNET_AUD_URL, CLIENT_ASSERTION_TYPE, CLIENT_PRIVATE_KEY, USERINFO_RESPONSE_TYPE, JWE_USERINFO_PRIVATE_KEY } = require("./config");
 
@@ -12,15 +13,8 @@ const alg = "RS256";
 const jweEncryAlgo = "RSA-OAEP-256";
 const expirationTime = "1h";
 
-// Predefined fees for each driving licence category
-const categoryFees = {
-    'A1': 1500.00,
-    'A':  1500.00,
-    'B1': 2000.00,
-    'B':  2500.00,
-    'C1': 3000.00,
-    'C':  3500.00,
-};
+// Initialize database tables
+User.initTables().catch(console.error);
 
 /**
  * Triggers /oauth/v2/token API on esignet service to fetch access token
@@ -48,7 +42,6 @@ const post_GetToken = async ({
   console.log(endpoint);
   console.log(request);
   
-  
   const response = await axios.post(endpoint, request, {
     headers: {
       "Content-Type": "application/x-www-form-urlencoded",
@@ -71,7 +64,93 @@ const get_GetUserInfo = async (access_token) => {
     },
   });
 
-  return decodeUserInfoResponse(response.data);
+  const userInfo = await decodeUserInfoResponse(response.data);
+  
+  // Save user information to database (but don't break flow if it fails)
+  try {
+    await saveUserToDatabase(userInfo);
+  } catch (dbError) {
+    console.error('Database save failed, but continuing with user info:', dbError.message);
+    // Continue with the user info even if database save fails
+  }
+  
+  return userInfo;
+};
+
+/**
+ * Save user information to PostgreSQL database
+ * @param {Object} userInfo User information from eSignet
+ */
+/**
+ * Save user information to PostgreSQL database
+ * @param {Object} userInfo User information from eSignet
+ */
+const saveUserToDatabase = async (userInfo) => {
+  try {
+    console.log('Raw userInfo from eSignet:', JSON.stringify(userInfo, null, 2));
+    
+    // Extract the actual NIC from eSignet response
+    // eSignet might provide NIC in different fields - adjust based on actual response
+    let nic = userInfo.nic || userInfo.sub;
+    
+    // If sub is a UUID and too long, try to find a proper NIC field
+    if (nic && nic.length > 50) {
+      console.warn('NIC value appears to be a UUID, looking for alternative NIC field');
+      
+      // Check common fields that might contain the actual NIC
+      nic = userInfo.nic_number || userInfo.personal_number || userInfo.national_id || 
+            userInfo.username || userInfo.preferred_username || userInfo.nic;
+      
+      // If still no proper NIC, use a truncated version or generate a placeholder
+      if (!nic || nic.length > 50) {
+        // Use the first 50 characters of sub as fallback
+        nic = userInfo.sub.substring(0, 50);
+        console.warn(`Using truncated sub as NIC: ${nic}`);
+      }
+    }
+    
+    // Validate NIC is present and not too long
+    if (!nic) {
+      throw new Error('NIC not found in eSignet response');
+    }
+    
+    if (nic.length > 255) {
+      nic = nic.substring(0, 255);
+      console.warn(`NIC truncated to 255 characters: ${nic}`);
+    }
+    
+    // Extract other user data with proper validation
+    const userData = {
+      nic: nic,
+      name: userInfo.name || 'Unknown',
+      email: userInfo.email || null,
+      phone: userInfo.phone_number || userInfo.phone || null,
+      date_of_birth: userInfo.birthdate || null,
+      address: userInfo.address ? 
+        (typeof userInfo.address === 'string' ? userInfo.address : JSON.stringify(userInfo.address)) : 
+        null
+    };
+    
+    // Validate required fields
+    if (!userData.name || userData.name === 'Unknown') {
+      console.warn('User name not provided, using fallback');
+      userData.name = `User_${nic.substring(0, 10)}`;
+    }
+
+    console.log('Processed user data for saving:', userData);
+    
+    const savedUser = await User.saveUser(userData);
+    console.log('User saved to database:', savedUser.nic);
+    
+    return savedUser;
+  } catch (error) {
+    console.error('Error saving user to database:', error);
+    
+    // Don't throw the error to prevent breaking the main flow
+    // Just log it and continue
+    console.log('Continuing without saving user to database...');
+    return null;
+  }
 };
 
 /**
@@ -82,21 +161,20 @@ const get_GetUserInfo = async (access_token) => {
 async function generateSignedJwt(clientId) {
   const privateKey = await importJWK(CLIENT_PRIVATE_KEY, alg);
   
-  // Token endpoint URL - THIS IS CRITICAL!
   const tokenEndpoint = ESIGNET_SERVICE_URL+"/oauth/v2/token";
 
   const jwt = await new SignJWT({
-      iss: clientId,    // Must equal client_id
-      sub: clientId,    // Must equal client_id  
-      aud: tokenEndpoint, // Must be EXACT token endpoint URL
-      jti: generateUniqueId() // REQUIRED: Unique token ID
+      iss: clientId,
+      sub: clientId,  
+      aud: tokenEndpoint,
+      jti: generateUniqueId()
     })
     .setProtectedHeader({ 
-      alg: "RS256",     // Typically RS256 for OAuth
+      alg: "RS256",
       typ: "JWT" 
     })
     .setIssuedAt()
-    .setExpirationTime("5m")  // 5-10 minutes max!
+    .setExpirationTime("5m")
     .sign(privateKey);
 
   return jwt;
@@ -114,7 +192,6 @@ function generateUniqueId() {
  * @returns decrypted/decoded json user information
  */
 const decodeUserInfoResponse = async (userInfoResponse) => {
-
   let response = userInfoResponse;
 
   if (USERINFO_RESPONSE_TYPE.toLowerCase() === "jwe") {
@@ -135,13 +212,127 @@ const decodeUserInfoResponse = async (userInfoResponse) => {
       }
     }
   }
-  // console.log("userInfoResponse", response);
   return await new jose.decodeJwt(response);
 };
 
 // ====================================================================
-// NEW METHODS FOR DRIVING LICENCE APPLICATION FLOW
+// UPDATED METHODS FOR LICENCE CATEGORIES (NOW FROM DATABASE)
 // ====================================================================
+
+/**
+ * Retrieves available licence categories with their details from database.
+ * @returns {Array} List of licence categories
+ */
+const getLicenceCategories = async () => {
+  try {
+    const categories = await User.getLicenceCategories();
+    return categories;
+  } catch (error) {
+    console.error('Error fetching licence categories from database:', error);
+    throw error;
+  }
+};
+
+/**
+ * Get specific licence category by code from database.
+ * @param {string} categoryCode - Licence category code (e.g., 'A1', 'B')
+ * @returns {Object} Licence category details
+ */
+const getLicenceCategoryByCode = async (categoryCode) => {
+  try {
+    const category = await User.getLicenceCategoryByCode(categoryCode);
+    if (!category) {
+      throw new Error(`Licence category '${categoryCode}' not found`);
+    }
+    return category;
+  } catch (error) {
+    console.error('Error fetching licence category from database:', error);
+    throw error;
+  }
+};
+
+/**
+ * Add new licence category to database.
+ * @param {Object} categoryData - Category data to add
+ * @returns {Object} Added category details
+ */
+const addLicenceCategory = async (categoryData) => {
+  try {
+    const newCategory = await User.addLicenceCategory(categoryData);
+    return newCategory;
+  } catch (error) {
+    console.error('Error adding licence category to database:', error);
+    throw error;
+  }
+};
+
+/**
+ * Update existing licence category in database.
+ * @param {string} categoryCode - Category code to update
+ * @param {Object} categoryData - Updated category data
+ * @returns {Object} Updated category details
+ */
+const updateLicenceCategory = async (categoryCode, categoryData) => {
+  try {
+    const updatedCategory = await User.updateLicenceCategory(categoryCode, categoryData);
+    return updatedCategory;
+  } catch (error) {
+    console.error('Error updating licence category in database:', error);
+    throw error;
+  }
+};
+
+/**
+ * Delete licence category (soft delete) from database.
+ * @param {string} categoryCode - Category code to delete
+ * @returns {Object} Deleted category details
+ */
+const deleteLicenceCategory = async (categoryCode) => {
+  try {
+    const deletedCategory = await User.deleteLicenceCategory(categoryCode);
+    return deletedCategory;
+  } catch (error) {
+    console.error('Error deleting licence category from database:', error);
+    throw error;
+  }
+};
+
+/**
+ * Calculates the total payment based on selected licence categories from database.
+ * @param {Array} categories - Array of selected licence categories
+ * @returns {Object} Payment calculation result
+ */
+const calculatePayment = async (categories) => {
+  if (!categories || !Array.isArray(categories) || categories.length === 0) {
+    throw new Error("An array of 'categories' is required.");
+  }
+
+  let totalAmount = 0;
+  const breakdown = [];
+
+  // Fetch each category from database to get current fees
+  for (const categoryCode of categories) {
+    try {
+      const category = await User.getLicenceCategoryByCode(categoryCode);
+      if (category) {
+        totalAmount += parseFloat(category.fee);
+        breakdown.push({ 
+          category: categoryCode, 
+          fee: category.fee,
+          description: category.description
+        });
+      }
+    } catch (error) {
+      console.warn(`Category ${categoryCode} not found in database`);
+    }
+  }
+
+  if (totalAmount === 0) {
+    throw new Error("None of the provided categories are valid.");
+  }
+
+  return { totalAmount, breakdown };
+};
 
 /**
  * Fetches a mock medical certificate based on a user's NIC.
@@ -153,7 +344,12 @@ const getMedicalCertificate = async (nic) => {
     throw new Error("NIC number is required.");
   }
 
-  // Mock success response
+  // Verify user exists in database
+  const user = await User.findByNIC(nic);
+  if (!user) {
+    throw new Error("User not found in database.");
+  }
+
   const medicalCertificate = {
     certificateId: `MC-${Math.floor(10000 + Math.random() * 90000)}`,
     issuedDate: "2025-08-15",
@@ -168,50 +364,6 @@ const getMedicalCertificate = async (nic) => {
   };
 
   return medicalCertificate;
-};
-
-/**
- * Calculates the total payment based on selected licence categories.
- * @param {Array} categories - Array of selected licence categories
- * @returns {Object} Payment calculation result
- */
-const calculatePayment = async (categories) => {
-  if (!categories || !Array.isArray(categories) || categories.length === 0) {
-    throw new Error("An array of 'categories' is required.");
-  }
-
-  let totalAmount = 0;
-  const breakdown = [];
-
-  categories.forEach(category => {
-    if (categoryFees[category]) {
-      totalAmount += categoryFees[category];
-      breakdown.push({ category: category, fee: categoryFees[category] });
-    }
-  });
-
-  if (totalAmount === 0) {
-    throw new Error("None of the provided categories are valid.");
-  }
-
-  return { totalAmount, breakdown };
-};
-
-/**
- * Retrieves available licence categories with their details.
- * @returns {Array} List of licence categories
- */
-const getLicenceCategories = async () => {
-  const categories = [
-    { id: 'A1', label: 'A1', description: 'Light Motor Cycle', fee: 1500.00 },
-    { id: 'A',  label: 'A',  description: 'Motor Cycle', fee: 1500.00 },
-    { id: 'B1', label: 'B1', description: 'Motor Tricycle', fee: 2000.00 },
-    { id: 'B',  label: 'B',  description: 'Light Motor Car', fee: 2500.00 },
-    { id: 'C1', label: 'C1', description: 'Light Motor Lorry', fee: 3000.00 },
-    { id: 'C',  label: 'C',  description: 'Heavy Motor Lorry', fee: 3500.00 }
-  ];
-  
-  return categories;
 };
 
 /**
@@ -230,16 +382,68 @@ const initiatePayment = async (applicationData) => {
     throw new Error("User NIC and total amount are mandatory.");
   }
 
-  // Mock success response with generated reference IDs
+  // Find user in database
+  const user = await User.findByNIC(userInfo.nic);
+  if (!user) {
+    throw new Error("User not found in database.");
+  }
+
+  const paymentReferenceId = `PAY-${Date.now()}`;
+  const applicationId = `DMT-${userInfo.nic.slice(0, 5)}-${Math.floor(1000 + Math.random() * 9000)}`;
+
+  // Save application to database
+  const applicationDataToSave = {
+    user_id: user.id,
+    application_id: applicationId,
+    medical_certificate_id: medicalCertificate.certificateId,
+    selected_categories: selectedCategories,
+    total_amount: paymentDetails.totalAmount,
+    payment_reference_id: paymentReferenceId
+  };
+
+  await User.saveApplication(applicationDataToSave);
+
   const response = {
     status: "success",
     message: "Payment initiated. You will be redirected shortly.",
-    paymentReferenceId: `PAY-${Date.now()}`,
-    applicationId: `DMT-${userInfo.nic.slice(0, 5)}-${Math.floor(1000 + Math.random() * 9000)}`,
-    paymentGatewayUrl: `https://mock-payment-gateway.com/pay?ref=PAY-${Date.now()}`
+    paymentReferenceId: paymentReferenceId,
+    applicationId: applicationId,
+    paymentGatewayUrl: `https://mock-payment-gateway.com/pay?ref=${paymentReferenceId}`
   };
 
   return response;
+};
+
+/**
+ * Get application history for a user
+ * @param {string} nic - User's NIC number
+ * @returns {Array} User's application history
+ */
+const getApplicationHistory = async (nic) => {
+  if (!nic) {
+    throw new Error("NIC number is required.");
+  }
+
+  const applications = await User.getUserApplications(nic);
+  return applications;
+};
+
+/**
+ * Get application details by ID
+ * @param {string} applicationId - Application ID
+ * @returns {Object} Application details
+ */
+const getApplicationDetails = async (applicationId) => {
+  if (!applicationId) {
+    throw new Error("Application ID is required.");
+  }
+
+  const application = await User.findApplicationById(applicationId);
+  if (!application) {
+    throw new Error("Application not found.");
+  }
+
+  return application;
 };
 
 module.exports = {
@@ -248,5 +452,11 @@ module.exports = {
   getMedicalCertificate: getMedicalCertificate,
   calculatePayment: calculatePayment,
   getLicenceCategories: getLicenceCategories,
-  initiatePayment: initiatePayment
+  getLicenceCategoryByCode: getLicenceCategoryByCode,
+  addLicenceCategory: addLicenceCategory,
+  updateLicenceCategory: updateLicenceCategory,
+  deleteLicenceCategory: deleteLicenceCategory,
+  initiatePayment: initiatePayment,
+  getApplicationHistory: getApplicationHistory,
+  getApplicationDetails: getApplicationDetails
 };
