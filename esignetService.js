@@ -12,6 +12,16 @@ const alg = "RS256";
 const jweEncryAlgo = "RSA-OAEP-256";
 const expirationTime = "1h";
 
+// Predefined fees for each driving licence category
+const categoryFees = {
+    'A1': 1500.00,
+    'A':  1500.00,
+    'B1': 2000.00,
+    'B':  2500.00,
+    'C1': 3000.00,
+    'C':  3500.00,
+};
+
 /**
  * Triggers /oauth/v2/token API on esignet service to fetch access token
  * @param {string} code auth code
@@ -69,7 +79,6 @@ const get_GetUserInfo = async (access_token) => {
  * @param {string} clientId registered client id
  * @returns client assertion signedJWT
  */
-
 async function generateSignedJwt(clientId) {
   const privateKey = await importJWK(CLIENT_PRIVATE_KEY, alg);
   
@@ -98,34 +107,6 @@ function generateUniqueId() {
   return Math.random().toString(36).substring(2) + 
          Date.now().toString(36);
 }
-
-// const generateSignedJwt = async (clientId) => {
-//   // Set headers for JWT
-//   var header = {
-//     alg: alg,
-//     typ: "JWT",
-//   };
-
-//   var payload = {
-//     iss: clientId,
-//     sub: clientId,
-//     aud: ESIGNET_AUD_URL,
-//   };
-
-//   var decodeKey = Buffer.from(CLIENT_PRIVATE_KEY, 'base64')?.toString();
-//   const jwkObject = JSON.parse(decodeKey);
-//   const privateKey = await jose.importJWK(jwkObject, alg);
-//   // var privateKey = await jose.importPKCS8(CLIENT_PRIVATE_KEY, alg);
-
-//   const jwt = new jose.SignJWT(payload)
-//     .setProtectedHeader(header)
-//     .setIssuedAt()
-//     .setJti(Math.random().toString(36).substring(2,7))
-//     .setExpirationTime(expirationTime)
-//     .sign(privateKey);
-
-//   return jwt;
-// };
 
 /**
  * decrypts and decodes the user information fetched from esignet services
@@ -158,7 +139,114 @@ const decodeUserInfoResponse = async (userInfoResponse) => {
   return await new jose.decodeJwt(response);
 };
 
+// ====================================================================
+// NEW METHODS FOR DRIVING LICENCE APPLICATION FLOW
+// ====================================================================
+
+/**
+ * Fetches a mock medical certificate based on a user's NIC.
+ * @param {string} nic - User's NIC number
+ * @returns {Object} Medical certificate data
+ */
+const getMedicalCertificate = async (nic) => {
+  if (!nic) {
+    throw new Error("NIC number is required.");
+  }
+
+  // Mock success response
+  const medicalCertificate = {
+    certificateId: `MC-${Math.floor(10000 + Math.random() * 90000)}`,
+    issuedDate: "2025-08-15",
+    expiryDate: "2026-08-14",
+    doctorName: "Dr. A. Silva",
+    hospital: "National Hospital of Sri Lanka",
+    bloodGroup: "O+",
+    isFitToDrive: true,
+    vision: "6/6 (Corrected)",
+    hearing: "Normal",
+    remarks: "Fit to operate all classes of motor vehicles."
+  };
+
+  return medicalCertificate;
+};
+
+/**
+ * Calculates the total payment based on selected licence categories.
+ * @param {Array} categories - Array of selected licence categories
+ * @returns {Object} Payment calculation result
+ */
+const calculatePayment = async (categories) => {
+  if (!categories || !Array.isArray(categories) || categories.length === 0) {
+    throw new Error("An array of 'categories' is required.");
+  }
+
+  let totalAmount = 0;
+  const breakdown = [];
+
+  categories.forEach(category => {
+    if (categoryFees[category]) {
+      totalAmount += categoryFees[category];
+      breakdown.push({ category: category, fee: categoryFees[category] });
+    }
+  });
+
+  if (totalAmount === 0) {
+    throw new Error("None of the provided categories are valid.");
+  }
+
+  return { totalAmount, breakdown };
+};
+
+/**
+ * Retrieves available licence categories with their details.
+ * @returns {Array} List of licence categories
+ */
+const getLicenceCategories = async () => {
+  const categories = [
+    { id: 'A1', label: 'A1', description: 'Light Motor Cycle', fee: 1500.00 },
+    { id: 'A',  label: 'A',  description: 'Motor Cycle', fee: 1500.00 },
+    { id: 'B1', label: 'B1', description: 'Motor Tricycle', fee: 2000.00 },
+    { id: 'B',  label: 'B',  description: 'Light Motor Car', fee: 2500.00 },
+    { id: 'C1', label: 'C1', description: 'Light Motor Lorry', fee: 3000.00 },
+    { id: 'C',  label: 'C',  description: 'Heavy Motor Lorry', fee: 3500.00 }
+  ];
+  
+  return categories;
+};
+
+/**
+ * Simulates the final step of initiating payment for the application.
+ * @param {Object} applicationData - Complete application data
+ * @returns {Object} Payment initiation response
+ */
+const initiatePayment = async (applicationData) => {
+  const { userInfo, medicalCertificate, selectedCategories, paymentDetails } = applicationData;
+
+  if (!userInfo || !medicalCertificate || !selectedCategories || !paymentDetails) {
+    throw new Error("Incomplete application data. Required fields are missing.");
+  }
+
+  if (!userInfo.nic || !paymentDetails.totalAmount) {
+    throw new Error("User NIC and total amount are mandatory.");
+  }
+
+  // Mock success response with generated reference IDs
+  const response = {
+    status: "success",
+    message: "Payment initiated. You will be redirected shortly.",
+    paymentReferenceId: `PAY-${Date.now()}`,
+    applicationId: `DMT-${userInfo.nic.slice(0, 5)}-${Math.floor(1000 + Math.random() * 9000)}`,
+    paymentGatewayUrl: `https://mock-payment-gateway.com/pay?ref=PAY-${Date.now()}`
+  };
+
+  return response;
+};
+
 module.exports = {
   post_GetToken: post_GetToken,
   get_GetUserInfo: get_GetUserInfo,
+  getMedicalCertificate: getMedicalCertificate,
+  calculatePayment: calculatePayment,
+  getLicenceCategories: getLicenceCategories,
+  initiatePayment: initiatePayment
 };
