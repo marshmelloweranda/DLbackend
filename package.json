@@ -5,8 +5,8 @@
   "main": "script.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node app.js",
-    "devstart": "node app.js && nodemon ."
+    "start": "node server.js",
+    "devstart": "node server.js && nodemon ."
   },
   "author": "MOSIP",
   "license": "MIT",
