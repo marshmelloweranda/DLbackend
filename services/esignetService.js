@@ -1,13 +1,13 @@
 const axios = require("axios");
 const jose = require("jose");
 const { importJWK, SignJWT, compactDecrypt, flattenedDecrypt, generalDecrypt, decodeJwt } = require("jose");
-const User = require("./models/userModel");
+const User = require("../models/userModel");
 
 // Temporary storage for pending applications (until payment is confirmed)
 // In production, you might want to use Redis or database for this
 const pendingApplications = new Map();
 
-const { ESIGNET_SERVICE_URL, ESIGNET_AUD_URL, CLIENT_ASSERTION_TYPE, CLIENT_PRIVATE_KEY, USERINFO_RESPONSE_TYPE, JWE_USERINFO_PRIVATE_KEY } = require("./config");
+const { ESIGNET_SERVICE_URL, ESIGNET_AUD_URL, CLIENT_ASSERTION_TYPE, CLIENT_PRIVATE_KEY, USERINFO_RESPONSE_TYPE, JWE_USERINFO_PRIVATE_KEY } = require("../config");
 
 const baseUrl = ESIGNET_SERVICE_URL ? ESIGNET_SERVICE_URL.trim() : '';
 const getTokenEndPoint = "/oauth/v2/token";

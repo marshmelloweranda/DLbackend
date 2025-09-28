@@ -14,7 +14,7 @@ const {
   getApplicationHistory,
   getApplicationDetails,
   confirmPayment
-} = require("./esignetService");
+} = require("./services/esignetService");
 
 const app = express();
 app.use(express.json());
