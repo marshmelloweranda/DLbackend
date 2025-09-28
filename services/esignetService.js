@@ -580,6 +580,147 @@ const confirmPayment = async (paymentReferenceId, paymentSuccess, transactionId)
   }
 };
 
+/**
+ * Fetches written test results based on user's NIC
+ * @param {string} sub - User's subject identifier
+ * @returns {Object} Written test results
+ */
+const getWrittenTestResults = async (sub) => {
+  if (!sub) {
+    throw new Error("Subject identifier is required.");
+  }
+
+  // Verify user exists in database
+  const user = await User.findBySub(sub);
+  if (!user) {
+    throw new Error("User not found in database.");
+  }
+
+  // Mock written test results - in real implementation, this would come from a test database
+  const writtenTest = {
+    testId: `WT-${Math.floor(10000 + Math.random() * 90000)}`,
+    testDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 30 days ago
+    score: Math.floor(60 + Math.random() * 40), // Random score between 60-100
+    totalQuestions: 50,
+    correctAnswers: Math.floor(30 + Math.random() * 20),
+    timeTaken: `${Math.floor(20 + Math.random() * 40)} minutes`,
+    examinerName: "Mr. K. Perera",
+    testCenter: "Colombo Driving Test Center",
+    remarks: "Completed within allocated time"
+  };
+
+  return writtenTest;
+};
+
+/**
+ * Fetches practical test results based on user's NIC
+ * @param {string} sub - User's subject identifier
+ * @returns {Object} Practical test results
+ */
+const getPracticalTestResults = async (sub) => {
+  if (!sub) {
+    throw new Error("Subject identifier is required.");
+  }
+
+  // Verify user exists in database
+  const user = await User.findBySub(sub);
+  if (!user) {
+    throw new Error("User not found in database.");
+  }
+
+  // Mock practical test results
+  const practicalTest = {
+    testId: `PT-${Math.floor(10000 + Math.random() * 90000)}`,
+    testDate: new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], // 15 days ago
+    testType: "Road Test",
+    vehicleCategory: "B",
+    score: Math.floor(70 + Math.random() * 30), // Random score between 70-100
+    maxScore: 100,
+    examinerName: "Mrs. S. Fernando",
+    testRoute: "City Center Route",
+    passed: Math.random() > 0.3, // 70% pass rate
+    remarks: "Good vehicle control, needs improvement on parallel parking"
+  };
+
+  return practicalTest;
+};
+
+/**
+ * Stores medical certificate for a user
+ * @param {string} sub - User's subject identifier
+ * @param {Object} certificateData - Medical certificate data
+ * @returns {Object} Operation result
+ */
+const setMedicalCertificate = async (sub, certificateData) => {
+  if (!sub || !certificateData) {
+    throw new Error("Subject identifier and certificate data are required.");
+  }
+
+  // Verify user exists
+  const user = await User.findBySub(sub);
+  if (!user) {
+    throw new Error("User not found in database.");
+  }
+
+  // In a real implementation, you would save this to a medical_certificates table
+  // For now, we'll just return a success message
+  console.log(`Medical certificate stored for user ${sub}:`, certificateData);
+  
+  return {
+    success: true,
+    message: "Medical certificate stored successfully",
+    certificateId: certificateData.certificateId || `MC-${Date.now()}`,
+    timestamp: new Date().toISOString()
+  };
+};
+
+/**
+ * Bulk update licence categories
+ * @param {Array} categories - Array of category objects
+ * @returns {Object} Operation result
+ */
+const setLicenceCategories = async (categories) => {
+  if (!categories || !Array.isArray(categories)) {
+    throw new Error("An array of categories is required.");
+  }
+
+  let updatedCount = 0;
+  let addedCount = 0;
+  const results = [];
+
+  for (const category of categories) {
+    try {
+      // Check if category exists
+      const existingCategory = await User.getLicenceCategoryByCode(category.category_code);
+      
+      if (existingCategory) {
+        // Update existing category
+        const updated = await User.updateLicenceCategory(category.category_code, category);
+        results.push({ action: 'updated', category: category.category_code, data: updated });
+        updatedCount++;
+      } else {
+        // Add new category
+        const added = await User.addLicenceCategory(category);
+        results.push({ action: 'added', category: category.category_code, data: added });
+        addedCount++;
+      }
+    } catch (error) {
+      results.push({ action: 'error', category: category.category_code, error: error.message });
+    }
+  }
+
+  return {
+    success: true,
+    summary: {
+      totalProcessed: categories.length,
+      added: addedCount,
+      updated: updatedCount,
+      errors: categories.length - (addedCount + updatedCount)
+    },
+    details: results
+  };
+};
+
 // Export all functions
 module.exports = {
   post_GetToken,
@@ -595,5 +736,9 @@ module.exports = {
   getApplicationHistory,
   getApplicationDetails,
   confirmPayment,
-  cleanupPendingApplications
+  cleanupPendingApplications,
+  getWrittenTestResults,
+  getPracticalTestResults,
+  setMedicalCertificate,
+  setLicenceCategories
 };

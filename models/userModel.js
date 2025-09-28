@@ -302,6 +302,7 @@ class User {
       await this.createLicenceCategoriesTable(client);
       await this.createSessionsTable(client);
       await this.createApplicationsTable(client);
+      await this.createMedicalCertificatesTable(client); // Add this line
       await this.seedLicenceCategories(client);
 
       await client.query('COMMIT');
@@ -314,6 +315,7 @@ class User {
       client.release();
     }
   }
+
 
   // Save or update user
   static async saveUser(userData) {
@@ -355,6 +357,68 @@ class User {
       return result.rows[0];
     } catch (error) {
       throw new Error(`Failed to save user: ${error.message}`);
+    }
+  }
+
+  // Add method to save medical certificate
+  static async saveMedicalCertificate(userId, certificateData) {
+    try {
+      const {
+        certificate_id,
+        issued_date,
+        expiry_date,
+        doctor_name,
+        hospital,
+        blood_group,
+        is_fit_to_drive,
+        vision_status,
+        hearing_status,
+        remarks
+      } = certificateData;
+
+      this.validateRequiredFields(certificateData, [
+        'certificate_id', 'issued_date', 'expiry_date', 'doctor_name', 'hospital'
+      ]);
+
+      const query = `
+      INSERT INTO medical_certificates (
+        user_id, certificate_id, issued_date, expiry_date, doctor_name, hospital,
+        blood_group, is_fit_to_drive, vision_status, hearing_status, remarks
+      ) 
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      ON CONFLICT (certificate_id) 
+      DO UPDATE SET 
+        issued_date = EXCLUDED.issued_date,
+        expiry_date = EXCLUDED.expiry_date,
+        doctor_name = EXCLUDED.doctor_name,
+        hospital = EXCLUDED.hospital,
+        blood_group = EXCLUDED.blood_group,
+        is_fit_to_drive = EXCLUDED.is_fit_to_drive,
+        vision_status = EXCLUDED.vision_status,
+        hearing_status = EXCLUDED.hearing_status,
+        remarks = EXCLUDED.remarks,
+        updated_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+
+      const values = [
+        userId,
+        certificate_id,
+        issued_date,
+        expiry_date,
+        doctor_name,
+        hospital,
+        blood_group,
+        is_fit_to_drive,
+        vision_status,
+        hearing_status,
+        remarks
+      ];
+
+      const result = await this.executeQuery(query, values, 'Save medical certificate');
+      return result.rows[0];
+    } catch (error) {
+      throw new Error(`Failed to save medical certificate: ${error.message}`);
     }
   }
 
@@ -736,6 +800,38 @@ class User {
       return result.rows[0];
     } catch (error) {
       throw new Error(`Failed to update application status: ${error.message}`);
+    }
+  }
+
+  // Create medical certificates table
+  static async createMedicalCertificatesTable(client = null) {
+    const query = `
+    CREATE TABLE IF NOT EXISTS medical_certificates (
+      id SERIAL PRIMARY KEY,
+      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      certificate_id VARCHAR(100) UNIQUE NOT NULL,
+      issued_date DATE NOT NULL,
+      expiry_date DATE NOT NULL,
+      doctor_name VARCHAR(255) NOT NULL,
+      hospital VARCHAR(255) NOT NULL,
+      blood_group VARCHAR(10),
+      is_fit_to_drive BOOLEAN DEFAULT true,
+      vision_status TEXT,
+      hearing_status TEXT,
+      remarks TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+    
+    CREATE INDEX IF NOT EXISTS idx_medical_certificates_user_id ON medical_certificates(user_id);
+    CREATE INDEX IF NOT EXISTS idx_medical_certificates_certificate_id ON medical_certificates(certificate_id);
+    CREATE INDEX IF NOT EXISTS idx_medical_certificates_expiry_date ON medical_certificates(expiry_date);
+  `;
+
+    if (client) {
+      await client.query(query);
+    } else {
+      await this.executeQuery(query, [], 'Create medical certificates table');
     }
   }
 }

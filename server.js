@@ -1,10 +1,10 @@
 const express = require("express");
 const { PORT } = require("./config");
-const { 
-  post_GetToken, 
-  get_GetUserInfo, 
-  getMedicalCertificate, 
-  calculatePayment, 
+const {
+  post_GetToken,
+  get_GetUserInfo,
+  getMedicalCertificate,
+  calculatePayment,
   getLicenceCategories,
   getLicenceCategoryByCode,
   addLicenceCategory,
@@ -13,7 +13,11 @@ const {
   initiatePayment,
   getApplicationHistory,
   getApplicationDetails,
-  confirmPayment
+  confirmPayment,
+  getWrittenTestResults,
+  getPracticalTestResults,
+  setMedicalCertificate,
+  setLicenceCategories
 } = require("./services/esignetService");
 
 const app = express();
@@ -24,7 +28,7 @@ const cors = require('cors');
 
 // Allow requests from your React App's origin (http://localhost:3001)
 app.use(cors({
-    origin: 'http://localhost:3001'
+  origin: 'http://localhost:3001'
 }));
 
 app.get("/", (req, res) => {
@@ -45,11 +49,11 @@ app.post("/delegate/fetchUserInfo", async (req, res) => {
     console.log("Fetching user info from eSignet...");
     const tokenResponse = await post_GetToken(req.body);
     console.log("Token response received");
-    
+
     if (tokenResponse.error) {
       return res.status(400).json(tokenResponse);
     }
-    
+
     const userInfo = await get_GetUserInfo(tokenResponse.access_token);
     res.json(userInfo);
   } catch (error) {
@@ -133,7 +137,7 @@ app.get("/api/licence-categories/:categoryCode", async (req, res) => {
     res.json(category);
   } catch (error) {
     console.error("Error fetching licence category:", error.message);
-    
+
     if (error.message.includes('not found')) {
       return res.status(404).json({ error: error.message });
     }
@@ -149,11 +153,11 @@ app.get("/api/licence-categories/:categoryCode", async (req, res) => {
 app.post("/api/licence-categories", async (req, res) => {
   try {
     const categoryData = req.body;
-    
+
     if (!categoryData.code || !categoryData.description || !categoryData.fee) {
       return res.status(400).json({ error: "Code, description, and fee are required fields." });
     }
-    
+
     const newCategory = await addLicenceCategory(categoryData);
     res.status(201).json(newCategory);
   } catch (error) {
@@ -171,16 +175,16 @@ app.put("/api/licence-categories/:categoryCode", async (req, res) => {
   try {
     const { categoryCode } = req.params;
     const categoryData = req.body;
-    
+
     if (Object.keys(categoryData).length === 0) {
       return res.status(400).json({ error: "No data provided for update." });
     }
-    
+
     const updatedCategory = await updateLicenceCategory(categoryCode, categoryData);
     res.json(updatedCategory);
   } catch (error) {
     console.error("Error updating licence category:", error.message);
-    
+
     if (error.message.includes('not found')) {
       return res.status(404).json({ error: error.message });
     }
@@ -197,14 +201,14 @@ app.delete("/api/licence-categories/:categoryCode", async (req, res) => {
   try {
     const { categoryCode } = req.params;
     const deletedCategory = await deleteLicenceCategory(categoryCode);
-    
-    res.json({ 
+
+    res.json({
       message: `Category ${categoryCode} deleted successfully`,
-      category: deletedCategory 
+      category: deletedCategory
     });
   } catch (error) {
     console.error("Error deleting licence category:", error.message);
-    
+
     if (error.message.includes('not found')) {
       return res.status(404).json({ error: error.message });
     }
@@ -228,14 +232,14 @@ app.post("/api/initiate-payment", async (req, res) => {
 
     // Validate required fields
     const { userInfo, medicalCertificate, selectedCategories, paymentDetails } = applicationData;
-    
+
     if (!userInfo || !medicalCertificate || !selectedCategories || !paymentDetails) {
-      return res.status(400).json({ 
-        error: "Incomplete application data. userInfo, medicalCertificate, selectedCategories, and paymentDetails are required." 
+      return res.status(400).json({
+        error: "Incomplete application data. userInfo, medicalCertificate, selectedCategories, and paymentDetails are required."
       });
     }
 
-  
+
     if (!userInfo.sub) {
       return res.status(400).json({ error: "User subject identifier (sub) is required." });
     }
@@ -259,8 +263,8 @@ app.post("/api/confirm-payment", async (req, res) => {
     const { paymentReferenceId, paymentSuccess, transactionId } = req.body;
 
     if (!paymentReferenceId || typeof paymentSuccess === 'undefined') {
-      return res.status(400).json({ 
-        error: "paymentReferenceId and paymentSuccess are required." 
+      return res.status(400).json({
+        error: "paymentReferenceId and paymentSuccess are required."
       });
     }
 
@@ -280,7 +284,7 @@ app.post("/api/confirm-payment", async (req, res) => {
 app.get("/api/application-history/:sub", async (req, res) => {
   try {
     const { sub } = req.params;
-    
+
     if (!sub) {
       return res.status(400).json({ error: "User subject identifier (sub) is required." });
     }
@@ -301,7 +305,7 @@ app.get("/api/application-history/:sub", async (req, res) => {
 app.get("/api/application-details/:applicationId", async (req, res) => {
   try {
     const { applicationId } = req.params;
-    
+
     if (!applicationId) {
       return res.status(400).json({ error: "Application ID is required." });
     }
@@ -310,7 +314,7 @@ app.get("/api/application-details/:applicationId", async (req, res) => {
     res.json(application);
   } catch (error) {
     console.error("Error fetching application details:", error.message);
-    
+
     if (error.message.includes('not found')) {
       return res.status(404).json({ error: error.message });
     }
@@ -325,10 +329,100 @@ app.get("/api/application-details/:applicationId", async (req, res) => {
  */
 app.get('/dmt/payment', (req, res) => {
   console.log(`[${new Date().toLocaleTimeString('en-LK')}] Received payment redirect request`);
-  res.json({ 
-    message: "Payment redirect endpoint", 
-    note: "This would typically redirect to a payment gateway" 
+  res.json({
+    message: "Payment redirect endpoint",
+    note: "This would typically redirect to a payment gateway"
   });
+});
+
+// Add these endpoints after the existing ones in server.js
+
+/**
+ * @route   POST /api/written-test
+ * @desc    Fetches written test results based on user's subject identifier
+ * @access  Public
+ * @body    { "sub": "user-subject-identifier" }
+ */
+app.post("/api/written-test", async (req, res) => {
+  try {
+    const { sub } = req.body;
+
+    if (!sub) {
+      return res.status(400).json({ error: "User subject identifier (sub) is required." });
+    }
+
+    const writtenTest = await getWrittenTestResults(sub);
+    res.json(writtenTest);
+  } catch (error) {
+    console.error("Error fetching written test results:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/practical-test
+ * @desc    Fetches practical test results based on user's subject identifier
+ * @access  Public
+ * @body    { "sub": "user-subject-identifier" }
+ */
+app.post("/api/practical-test", async (req, res) => {
+  try {
+    const { sub } = req.body;
+
+    if (!sub) {
+      return res.status(400).json({ error: "User subject identifier (sub) is required." });
+    }
+
+    const practicalTest = await getPracticalTestResults(sub);
+    res.json(practicalTest);
+  } catch (error) {
+    console.error("Error fetching practical test results:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/set-medical-certificate
+ * @desc    Stores medical certificate for a user (admin function)
+ * @access  Public (should be protected in production)
+ * @body    { "sub": "user-subject-identifier", "certificateData": {...} }
+ */
+app.post("/api/set-medical-certificate", async (req, res) => {
+  try {
+    const { sub, certificateData } = req.body;
+
+    if (!sub || !certificateData) {
+      return res.status(400).json({ error: "User subject identifier and certificate data are required." });
+    }
+
+    const result = await setMedicalCertificate(sub, certificateData);
+    res.json(result);
+  } catch (error) {
+    console.error("Error setting medical certificate:", error.message);
+    res.status(400).json({ error: error.message });
+  }
+});
+
+/**
+ * @route   POST /api/set-licence-categories
+ * @desc    Bulk update licence categories (admin function)
+ * @access  Public (should be protected in production)
+ * @body    { "categories": [{...}] }
+ */
+app.post("/api/set-licence-categories", async (req, res) => {
+  try {
+    const { categories } = req.body;
+
+    if (!categories || !Array.isArray(categories)) {
+      return res.status(400).json({ error: "An array of categories is required." });
+    }
+
+    const result = await setLicenceCategories(categories);
+    res.json(result);
+  } catch (error) {
+    console.error("Error setting licence categories:", error.message);
+    res.status(400).json({ error: error.message });
+  }
 });
 
 // ====================================================================
