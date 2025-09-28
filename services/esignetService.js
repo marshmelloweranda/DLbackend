@@ -388,67 +388,6 @@ const getMedicalCertificate = async (sub) => {
 };
 
 /**
- * Simulates the final step of initiating payment for the application.
- * @param {Object} applicationData - Complete application data
- * @returns {Object} Payment initiation response
- */
-const initiatePayment = async (applicationData) => {
-  try {
-    console.log('=== initiatePayment called ===');
-    
-    const { userInfo, medicalCertificate, selectedCategories, paymentDetails } = applicationData;
-
-    if (!userInfo || !medicalCertificate || !selectedCategories || !paymentDetails) {
-      throw new Error("Incomplete application data. Required fields are missing.");
-    }
-
-    if (!userInfo.sub || !paymentDetails.totalAmount) {
-      throw new Error("User subject identifier and total amount are mandatory.");
-    }
-
-    // Find user in database
-    const user = await User.findBySub(userInfo.sub);
-    if (!user) {
-      throw new Error("User not found in database. Sub: " + userInfo.sub);
-    }
-
-    // Generate IDs
-    const paymentReferenceId = `PAY-${Date.now()}`;
-    const applicationId = `DMT-${userInfo.sub.slice(-5)}-${Math.floor(1000 + Math.random() * 9000)}`;
-
-    // Prepare application data with timestamp
-    const applicationDataToSave = {
-      user_id: user.id,
-      application_id: applicationId,
-      medical_certificate_id: medicalCertificate.certificateId,
-      selected_categories: JSON.stringify(selectedCategories),
-      total_amount: parseFloat(paymentDetails.totalAmount),
-      payment_reference_id: paymentReferenceId,
-      status: 'pending_payment',
-      createdAt: Date.now()
-    };
-
-    const response = {
-      status: "pending",
-      message: "Payment initiated. Application will be saved only after successful payment.",
-      paymentReferenceId: paymentReferenceId,
-      applicationId: applicationId,
-      paymentGatewayUrl: `https://mock-payment-gateway.com/pay?ref=${paymentReferenceId}`,
-      callbackUrl: `http://your-backend-url/api/payment-confirm`
-    };
-
-    // Store the application data temporarily
-    pendingApplications.set(paymentReferenceId, applicationDataToSave);
-
-    return response;
-
-  } catch (error) {
-    console.error('Error in initiatePayment:', error);
-    throw error;
-  }
-};
-
-/**
  * Get application history for a user
  * @param {string} sub - User's subject identifier
  * @returns {Array} User's application history
@@ -480,30 +419,6 @@ const getApplicationDetails = async (applicationId) => {
   return application;
 };
 
-/**
- * Clean up pending applications that are older than specified time
- * @param {number} maxAgeMinutes - Maximum age in minutes before cleanup
- */
-const cleanupPendingApplications = (maxAgeMinutes = 60) => {
-  const now = Date.now();
-  const maxAgeMs = maxAgeMinutes * 60 * 1000;
-  let cleanedCount = 0;
-  
-  for (const [paymentReferenceId, application] of pendingApplications.entries()) {
-    if (now - application.createdAt > maxAgeMs) {
-      console.log(`Cleaning up expired pending application: ${paymentReferenceId}`);
-      pendingApplications.delete(paymentReferenceId);
-      cleanedCount++;
-    }
-  }
-  
-  if (cleanedCount > 0) {
-    console.log(`Cleaned up ${cleanedCount} expired pending applications`);
-  }
-};
-
-// Run cleanup every 30 minutes
-setInterval(cleanupPendingApplications, 30 * 60 * 1000);
 
 /**
  * Confirm payment status from external payment gateway
@@ -512,74 +427,97 @@ setInterval(cleanupPendingApplications, 30 * 60 * 1000);
  * @param {string} transactionId - Transaction ID from payment gateway
  * @returns {Object} Payment confirmation result
  */
-const confirmPayment = async (paymentReferenceId, paymentSuccess, transactionId) => {
+const confirmPayment = async (formData) => {
   try {
     console.log('=== confirmPayment called ===');
-    console.log('Payment Reference ID:', paymentReferenceId);
-    console.log('Payment Success:', paymentSuccess);
-    console.log('Transaction ID:', transactionId);
+    console.log('Form Data Received:', formData);
 
-    // Find pending application
-    const application = pendingApplications.get(paymentReferenceId);
-    if (!application) {
-      throw new Error(`Pending application with payment reference ${paymentReferenceId} not found`);
-    }
+    // Debug: Check what selected_categories actually contains
+    console.log('Type of selected_categories:', typeof formData.selectedCategories);
+    console.log('Raw selected_categories value:', formData.selectedCategories);
+    console.log('Is array?', Array.isArray(formData.selectedCategories));
 
-    console.log('Found pending application:', application.application_id);
+    // Get selected_categories from formData
+    let selectCategories = formData.selectedCategories;
     
-    // DEBUG: Check what type selected_categories is
-    console.log('Selected categories type:', typeof application.selected_categories);
-    console.log('Selected categories value:', application.selected_categories);
-
-    // Parse selected_categories if it's a string
-    let selectedCategories = application.selected_categories;
-    if (typeof selectedCategories === 'string') {
+    // Since we can see it's already an array ['B'], we can simplify the logic
+    if (typeof selectCategories === 'string') {
       try {
-        selectedCategories = JSON.parse(selectedCategories);
-        console.log('Parsed selected categories:', selectedCategories);
+        selectCategories = JSON.parse(selectCategories);
+        console.log('Parsed selected categories from string:', selectCategories);
       } catch (parseError) {
-        console.error('Error parsing selected_categories:', parseError);
-        throw new Error('Invalid selected_categories format in database');
+        console.error('Error parsing selected_categories as JSON:', parseError);
+        // If simple string, convert to array
+        selectCategories = [selectCategories];
       }
     }
 
-    // Ensure it's a valid object/array
-    if (typeof selectedCategories !== 'object' || selectedCategories === null) {
-      throw new Error('selected_categories must be a valid JSON object');
-    }
+    // // Ensure it's an array (it should already be based on your data)
+    // if (!Array.isArray(selectedCategories)) {
+    //   // If it's not an array but exists, convert it
+    //   if (selectedCategories !== null && selectedCategories !== undefined) {
+    //     selectedCategories = [selectedCategories];
+    //   } else {
+    //     selectedCategories = [];
+    //   }
+    // }
 
-    // Prepare application data for saving
+    // console.log('Final selected categories:', selectedCategories);
+
+    // Prepare application data for saving with all properties
     const applicationData = {
-      user_id: application.user_id,
-      application_id: application.application_id,
-      medical_certificate_id: application.medical_certificate_id,
-      selected_categories: selectedCategories,
-      total_amount: application.total_amount,
-      payment_reference_id: paymentReferenceId,
-      payment_transaction_id: transactionId,
-      status: paymentSuccess ? 'submitted' : 'pending'
+      // Personal Information
+      sub: formData.sub,
+      fullName: formData.fullName,
+      email: formData.email,
+      phone: formData.phone,
+      dob: formData.dob,
+      gender: formData.gender,
+      blood_group: formData.bloodGroup,
+      
+      // Medical Certificate Information
+      medical_certificate_id: formData.certificateId,
+      doctorName: formData.doctorName,
+      hospital: formData.hospital,
+      issuedDate: formData.issuedDate,
+      expiryDate: formData.expiryDate,
+      isFitToDrive: formData.isFitToDrive,
+      vision: formData.vision,
+      hearing: formData.hearing,
+      remarks: formData.remarks,
+      photoUrl: formData.photoUrl,
+
+      // Test Results
+      writtenTest: formData.writtenTest,
+      practicalTest: formData.practicalTest,
+
+      // Application Details
+      selectCategories: selectCategories,
+      application_id: formData.certificateId, // Using certificateId as application_id
+      status: formData.status || 'pending',
+      
+      // Payment Information (if available)
+      total_amount: formData.total_amount || 0,
+      payment_reference_id: formData.payment_reference_id,
+      payment_transaction_id: formData.payment_transaction_id
     };
+
+    console.log('Application data prepared:', applicationData);
 
     // Save the application
     const savedApp = await User.saveApplication(applicationData);
     console.log('Application saved successfully:', savedApp);
-    
-    // Remove from pending applications if successful
-    if (paymentSuccess) {
-      pendingApplications.delete(paymentReferenceId);
-    }
-    
+
     return { 
       success: true, 
-      applicationId: application.application_id,
-      status: paymentSuccess ? 'submitted' : 'pending'
+      applicationId: applicationData.application_id,
+      status: applicationData.status
     };
   } catch (error) {
     console.error('Error in confirmPayment:', error);
     throw error;
   }
 };
-
 /**
  * Fetches written test results based on user's NIC
  * @param {string} sub - User's subject identifier
@@ -732,11 +670,9 @@ module.exports = {
   addLicenceCategory,
   updateLicenceCategory,
   deleteLicenceCategory,
-  initiatePayment,
   getApplicationHistory,
   getApplicationDetails,
   confirmPayment,
-  cleanupPendingApplications,
   getWrittenTestResults,
   getPracticalTestResults,
   setMedicalCertificate,

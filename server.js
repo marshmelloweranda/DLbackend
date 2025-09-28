@@ -10,7 +10,6 @@ const {
   addLicenceCategory,
   updateLicenceCategory,
   deleteLicenceCategory,
-  initiatePayment,
   getApplicationHistory,
   getApplicationDetails,
   confirmPayment,
@@ -25,6 +24,7 @@ app.use(express.json());
 
 // You need to enable CORS for your frontend to communicate with this backend
 const cors = require('cors');
+const { saveApplication } = require("./models/userModel");
 
 // Allow requests from your React App's origin (http://localhost:3001)
 app.use(cors({
@@ -217,42 +217,6 @@ app.delete("/api/licence-categories/:categoryCode", async (req, res) => {
 });
 
 /**
- * @route   POST /api/initiate-payment
- * @desc    Simulates the final step of initiating payment for the application.
- * @access  Public
- * @body    { "userInfo": {...}, "medicalCertificate": {...}, "selectedCategories": [...], "paymentDetails": {...} }
- */
-app.post("/api/initiate-payment", async (req, res) => {
-  try {
-    const applicationData = req.body;
-
-    if (!applicationData) {
-      return res.status(400).json({ error: "Application data is required." });
-    }
-
-    // Validate required fields
-    const { userInfo, medicalCertificate, selectedCategories, paymentDetails } = applicationData;
-
-    if (!userInfo || !medicalCertificate || !selectedCategories || !paymentDetails) {
-      return res.status(400).json({
-        error: "Incomplete application data. userInfo, medicalCertificate, selectedCategories, and paymentDetails are required."
-      });
-    }
-
-
-    if (!userInfo.sub) {
-      return res.status(400).json({ error: "User subject identifier (sub) is required." });
-    }
-
-    const paymentResponse = await initiatePayment(applicationData);
-    res.json(paymentResponse);
-  } catch (error) {
-    console.error("Error initiating payment:", error.message);
-    res.status(400).json({ error: error.message });
-  }
-});
-
-/**
  * @route   POST /api/confirm-payment
  * @desc    Confirm payment status from payment gateway callback
  * @access  Public (this would be called by payment gateway)
@@ -260,15 +224,9 @@ app.post("/api/initiate-payment", async (req, res) => {
  */
 app.post("/api/confirm-payment", async (req, res) => {
   try {
-    const { paymentReferenceId, paymentSuccess, transactionId } = req.body;
+    const formData = req.body;
 
-    if (!paymentReferenceId || typeof paymentSuccess === 'undefined') {
-      return res.status(400).json({
-        error: "paymentReferenceId and paymentSuccess are required."
-      });
-    }
-
-    const paymentResult = await confirmPayment(paymentReferenceId, paymentSuccess, transactionId);
+    const paymentResult = await confirmPayment(formData);
     res.json(paymentResult);
   } catch (error) {
     console.error("Error confirming payment:", error.message);

@@ -115,8 +115,8 @@ class User {
   static async createSessionsTable(client = null) {
     const query = `
     CREATE TABLE IF NOT EXISTS user_sessions (
-      id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      id SERIAL PRIMARY KEY,  
+      sub VARCHAR(100) REFERENCES users(sub) ON DELETE CASCADE,
       session_id VARCHAR(255) UNIQUE NOT NULL,
       access_token TEXT,
       token_type VARCHAR(50),
@@ -143,7 +143,7 @@ class User {
       EXECUTE FUNCTION calculate_expires_at();
     
     CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON user_sessions(session_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON user_sessions(user_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_sub ON user_sessions(sub);
     CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON user_sessions(expires_at);
     CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON user_sessions(created_at);
   `;
@@ -156,27 +156,60 @@ class User {
   }
 
   // Create applications table
-  static async createApplicationsTable(client = null) {
+ static async createApplicationsTable(client = null) {
     const query = `
       CREATE TABLE IF NOT EXISTS applications (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        sub VARCHAR(100) NOT NULL,
         application_id VARCHAR(100) UNIQUE NOT NULL,
-        medical_certificate_id VARCHAR(100),
+        medical_certificate_id VARCHAR(100) NOT NULL,
+        
+        -- Personal Information
+        full_name VARCHAR(255) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        phone VARCHAR(50),
+        date_of_birth DATE NOT NULL,
+        gender VARCHAR(20),
+        blood_group VARCHAR(10),
+        
+        -- Medical Certificate Information
+        doctor_name VARCHAR(255) NOT NULL,
+        hospital VARCHAR(255) NOT NULL,
+        issued_date DATE NOT NULL,
+        expiry_date DATE NOT NULL,
+        is_fit_to_drive BOOLEAN DEFAULT true,
+        vision VARCHAR(100),
+        hearing VARCHAR(100),
+        remarks TEXT,
+        photo_url TEXT,
+        
+        -- Test Results (stored as JSONB for flexibility)
+        written_test JSONB,
+        practical_test JSONB,
+        
+        -- Application Details
         selected_categories JSONB NOT NULL,
-        total_amount DECIMAL(10,2) NOT NULL,
+        total_amount DECIMAL(10,2) DEFAULT 0,
         payment_reference_id VARCHAR(100),
         payment_transaction_id VARCHAR(100),
         status VARCHAR(50) DEFAULT 'pending' CHECK (status IN ('pending', 'submitted', 'approved', 'rejected', 'cancelled')),
+        
+        -- Timestamps
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
       
+      -- Create indexes for better performance
       CREATE INDEX IF NOT EXISTS idx_applications_app_id ON applications(application_id);
-      CREATE INDEX IF NOT EXISTS idx_applications_user_id ON applications(user_id);
+      CREATE INDEX IF NOT EXISTS idx_applications_sub ON applications(sub);
+      CREATE INDEX IF NOT EXISTS idx_applications_medical_cert_id ON applications(medical_certificate_id);
       CREATE INDEX IF NOT EXISTS idx_applications_status ON applications(status);
       CREATE INDEX IF NOT EXISTS idx_applications_created_at ON applications(created_at);
+      CREATE INDEX IF NOT EXISTS idx_applications_email ON applications(email);
+      CREATE INDEX IF NOT EXISTS idx_applications_expiry_date ON applications(expiry_date);
       CREATE INDEX IF NOT EXISTS idx_applications_categories ON applications USING GIN (selected_categories);
+      CREATE INDEX IF NOT EXISTS idx_applications_written_test ON applications USING GIN (written_test);
+      CREATE INDEX IF NOT EXISTS idx_applications_practical_test ON applications USING GIN (practical_test);
     `;
 
     if (client) {
@@ -382,7 +415,7 @@ class User {
 
       const query = `
       INSERT INTO medical_certificates (
-        user_id, certificate_id, issued_date, expiry_date, doctor_name, hospital,
+        sub, certificate_id, issued_date, expiry_date, doctor_name, hospital,
         blood_group, is_fit_to_drive, vision_status, hearing_status, remarks
       ) 
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -586,7 +619,7 @@ class User {
       this.validateRequiredFields(sessionData, ['session_id', 'access_token']);
 
       const query = `
-      INSERT INTO user_sessions (user_id, session_id, access_token, token_type, expires_in, scope) 
+      INSERT INTO user_sessions (sub, session_id, access_token, token_type, expires_in, scope) 
       VALUES ($1, $2, $3, $4, $5, $6)
       ON CONFLICT (session_id) 
       DO UPDATE SET 
@@ -606,30 +639,66 @@ class User {
     }
   }
   // Save application
-  static async saveApplication(applicationData) {
+ static async saveApplication(applicationData) {
     try {
       const {
-        user_id,
+        sub,
         application_id,
         medical_certificate_id,
-        selected_categories,
-        total_amount,
-        payment_reference_id,
-        payment_transaction_id,
-        status = 'pending'
+        selectCategories,
+        status = 'pending',
+        
+        // Personal Information
+        fullName,
+        email,
+        phone,
+        dob,
+        gender,
+        bloodGroup,
+        
+        // Medical Certificate Information
+        doctorName,
+        hospital,
+        issuedDate,
+        expiryDate,
+        isFitToDrive,
+        vision,
+        hearing,
+        remarks,
+        photoUrl,
+        
+        // Test Results
+        writtenTest,
+        practicalTest,
+        
+        // Payment Information (optional)
+        total_amount = 0,
+        payment_reference_id = null,
+        payment_transaction_id = null
       } = applicationData;
 
       // Validate required fields
-      this.validateRequiredFields(applicationData, ['user_id', 'application_id', 'selected_categories', 'total_amount']);
+      this.validateRequiredFields(applicationData, [
+        'sub', 
+        'application_id', 
+        'selectCategories',
+        'fullName',
+        'email',
+        'dob',
+        'doctorName',
+        'hospital',
+        'issuedDate',
+        'expiryDate'
+      ]);
 
-      // Validate selected_categories is valid JSON object
-      if (typeof selected_categories !== 'object' || selected_categories === null) {
-        throw new Error('selected_categories must be a valid JSON object');
+      // Validate selectCategories is valid JSON object/array
+      if (!Array.isArray(selectCategories) && typeof selectCategories !== 'object') {
+        throw new Error('selected_categories must be a valid array or JSON object');
       }
 
-      // Validate total_amount is positive
-      if (total_amount <= 0) {
-        throw new Error('Total amount must be a positive number');
+      // Validate total_amount is non-negative
+      if (total_amount < 0) {
+        throw new Error('Total amount must be a non-negative number');
       }
 
       // Validate status
@@ -638,25 +707,54 @@ class User {
         throw new Error(`Invalid status. Must be one of: ${validStatuses.join(', ')}`);
       }
 
+      // Validate test results structure
+      if (writtenTest && typeof writtenTest !== 'object') {
+        throw new Error('writtenTest must be a valid JSON object');
+      }
+
+      if (practicalTest && typeof practicalTest !== 'object') {
+        throw new Error('practicalTest must be a valid JSON object');
+      }
+
       const query = `
         INSERT INTO applications (
-          user_id, application_id, medical_certificate_id, 
-          selected_categories, total_amount, payment_reference_id,
-          payment_transaction_id, status
+          sub, application_id, medical_certificate_id, 
+          selected_categories, status, total_amount, payment_reference_id,
+          payment_transaction_id, full_name, email, phone, date_of_birth, gender,
+          blood_group, doctor_name, hospital, issued_date, expiry_date,
+          is_fit_to_drive, vision, hearing, remarks, photo_url,
+          written_test, practical_test
         ) 
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
         RETURNING *
       `;
 
       const values = [
-        user_id,
+        sub,
         application_id,
         medical_certificate_id,
-        JSON.stringify(selected_categories), // Ensure it's stringified JSON
+        JSON.stringify(selectCategories),
+        status,
         total_amount,
         payment_reference_id,
         payment_transaction_id,
-        status
+        fullName,
+        email,
+        phone,
+        dob,
+        gender,
+        bloodGroup,
+        doctorName,
+        hospital,
+        issuedDate,
+        expiryDate,
+        isFitToDrive,
+        vision,
+        hearing,
+        remarks,
+        photoUrl,
+        writtenTest ? JSON.stringify(writtenTest) : null,
+        practicalTest ? JSON.stringify(practicalTest) : null
       ];
 
       const result = await this.executeQuery(query, values, 'Save application');
@@ -701,7 +799,7 @@ class User {
           u.sub, u.name, u.email, u.phone,
           u.date_of_birth, u.address
         FROM applications a 
-        JOIN users u ON a.user_id = u.id 
+        JOIN users u ON a.sub = u.sub
         WHERE a.application_id = $1
       `;
 
@@ -738,9 +836,9 @@ class User {
       const query = `
         SELECT 
           a.*,
-          (SELECT COUNT(*) FROM applications a2 JOIN users u2 ON a2.user_id = u2.id WHERE u2.sub = $1 ${status ? `AND a2.status = $${paramCount}` : ''}) as total_count
+          (SELECT COUNT(*) FROM applications a2 JOIN users u2 ON a2.sub = u2.sub WHERE u2.sub = $1 ${status ? `AND a2.status = $${paramCount}` : ''}) as total_count
         FROM applications a 
-        JOIN users u ON a.user_id = u.id 
+        JOIN users u ON a.sub = u.sub
         ${whereClause}
         ORDER BY a.created_at DESC
         LIMIT $${paramCount + 1} OFFSET $${paramCount + 2}
@@ -808,7 +906,7 @@ class User {
     const query = `
     CREATE TABLE IF NOT EXISTS medical_certificates (
       id SERIAL PRIMARY KEY,
-      user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+      sub VARCHAR(100) REFERENCES users(sub) ON DELETE CASCADE,
       certificate_id VARCHAR(100) UNIQUE NOT NULL,
       issued_date DATE NOT NULL,
       expiry_date DATE NOT NULL,
@@ -822,8 +920,8 @@ class User {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    
-    CREATE INDEX IF NOT EXISTS idx_medical_certificates_user_id ON medical_certificates(user_id);
+
+    CREATE INDEX IF NOT EXISTS idx_medical_certificates_sub ON medical_certificates(sub);
     CREATE INDEX IF NOT EXISTS idx_medical_certificates_certificate_id ON medical_certificates(certificate_id);
     CREATE INDEX IF NOT EXISTS idx_medical_certificates_expiry_date ON medical_certificates(expiry_date);
   `;
