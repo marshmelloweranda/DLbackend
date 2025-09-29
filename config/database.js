@@ -13,7 +13,7 @@ const dbConfig = {
   port: process.env.DB_PORT || 5432,
   database: process.env.DB_NAME || 'driving_licence_db',
   user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'password',
+  password: process.env.DB_PASS || 'password',
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
   // Connection timeout of 5 seconds
   connectionTimeoutMillis: 5000,

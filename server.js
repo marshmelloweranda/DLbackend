@@ -26,9 +26,9 @@ app.use(express.json());
 const cors = require('cors');
 const { saveApplication } = require("./models/userModel");
 
-// Allow requests from your React App's origin (http://localhost:3001)
+// Allow requests from your React App's origin (http://localhost:3009)
 app.use(cors({
-  origin: 'http://localhost:3001'
+  origin: 'http://localhost:3009'
 }));
 
 app.get("/", (req, res) => {
