@@ -9,9 +9,9 @@ const { Pool } = require('pg');
 
 // Database configuration with fallbacks
 const dbConfig = {
-  host: process.env.DB_HOST || 'localhost',
-  port: process.env.DB_PORT || 5432,
-  database: process.env.DB_NAME || 'driving_licence_db',
+  host: process.env.DB_HOST || '127.0.0.1',
+  port: process.env.DB_PORT || 5433,
+  database: process.env.DB_NAME || 'inji_certify',
   user: process.env.DB_USER || 'postgres',
   password: process.env.DB_PASS || 'password',
   ssl: process.env.DB_SSL === 'true' ? { rejectUnauthorized: false } : false,
